@@ -1,0 +1,16 @@
+# Data
+MyData/
+dcm_database/
+*.tflite
+*.cpkt
+*.names
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
