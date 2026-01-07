@@ -284,6 +284,11 @@ class SingleClassClassifier(object):
         else:
             print("TFLite model not found.")
 
+    def saveModel(self, title):
+        save_path = os.path.join(self.model_dir, title)
+        self.model.save(save_path)
+        print(f"Model saved to: {save_path}")
+
     def quantizeModel(self):
         os.makedirs(self.tflite_dir, exist_ok=True)
 
@@ -372,6 +377,7 @@ class SingleClassClassifier(object):
             epochs, prev_history=history)
         self.evaluateModel()
         self.evaluateMetrics()
+        self.saveModel(self.prod_id)
         self.quantizeModel()
         self.benchmarkInference()
         self.getModelSize(self.prod_id)
@@ -401,6 +407,7 @@ class SingleClassClassifier(object):
             epochs)
         self.evaluateModel()
         self.evaluateMetrics()
+        self.saveModel(self.prod_id)
         self.quantizeModel()
         self.benchmarkInference()
         self.getModelSize(self.prod_id)
