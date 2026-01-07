@@ -4,6 +4,8 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import pickle
 import shutil
+import time
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH_SIZE = 128
@@ -198,6 +200,90 @@ class SingleClassClassifier(object):
         print("Model accuracy: {:5.2f}%".format(100 * acc))
         return loss, acc
 
+    def evaluateMetrics(self):
+        print("\n--- Detailed Evaluation ---")
+        y_true = []
+        y_pred = []
+        
+        # Iterate over the validation dataset
+        for images, labels in self.val_ds:
+            predictions = self.model.predict(images, verbose=0)
+            predicted_labels = np.argmax(predictions, axis=1)
+            
+            y_true.extend(labels.numpy())
+            y_pred.extend(predicted_labels)
+            
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
+        
+        # Calculate Metrics
+        accuracy = np.mean(y_true == y_pred)
+        f1 = f1_score(y_true, y_pred, average='weighted')
+        conf_matrix = confusion_matrix(y_true, y_pred)
+        
+        print(f"Accuracy: {accuracy*100:.2f}%")
+        print(f"F1 Score (Weighted): {f1:.4f}")
+        print("Confusion Matrix:")
+        print(conf_matrix)
+        print("\nClassification Report:")
+        print(classification_report(y_true, y_pred, target_names=self.class_names))
+        
+    def benchmarkInference(self, num_images=100):
+        print("\n--- Inference Speed Benchmark ---")
+        # Get a batch of images
+        for images, _ in self.val_ds.take(1):
+             sample_images = images
+             break
+        
+        # Warmup
+        print("Warming up...")
+        _ = self.model.predict(sample_images, verbose=0)
+        
+        start_time = time.time()
+        count = 0
+        # Predict on random single images to simulate real-world inference
+        # We use a loop to measure per-call overhead appropriately
+        # Using the batch we fetched suitable for single prediction simulation
+        
+        # Flatten batch to list of single images
+        single_images = [np.expand_dims(img, 0) for img in sample_images]
+        
+        # Run until we hit num_images or run out of batch
+        limit = min(num_images, len(single_images))
+        
+        for i in range(limit):
+            _ = self.model.predict(single_images[i], verbose=0)
+            count += 1
+            
+        end_time = time.time()
+        total_time = end_time - start_time
+        
+        avg_time_per_img = (total_time / count) * 1000 # in ms
+        throughput = count / total_time # images/sec
+        
+        print(f"Inference Latency: {avg_time_per_img:.2f} ms/image")
+        print(f"Throughput: {throughput:.2f} images/sec")
+        
+    def getModelSize(self, title):
+        print("\n--- Model Size ---")
+        # Check SavedModel directory size
+        model_path = os.path.join(self.model_dir, title)
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(model_path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        
+        print(f"SavedModel Size: {total_size / (1024*1024):.2f} MB")
+        
+        # Check TFLite size
+        tflite_path = os.path.join(self.tflite_dir, title + '_f16.tflite')
+        if os.path.exists(tflite_path):
+            tflite_size = os.path.getsize(tflite_path)
+            print(f"TFloat16 TFLite Size: {tflite_size / (1024*1024):.2f} MB")
+        else:
+            print("TFLite model not found.")
+
     def quantizeModel(self):
         os.makedirs(self.tflite_dir, exist_ok=True)
 
@@ -280,11 +366,15 @@ class SingleClassClassifier(object):
         history = self.trainModel(
             initial_epochs)
         self.evaluateModel()
+        self.evaluateMetrics()
         self.finetuneModel(learning_rate=learning_rate/10)
         history_fine = self.trainModel(
             epochs, prev_history=history)
         self.evaluateModel()
+        self.evaluateMetrics()
         self.quantizeModel()
+        self.benchmarkInference()
+        self.getModelSize(self.prod_id)
         self.removeTempDir()
 
     def runTrainingAll(self, epochs=100):
@@ -310,7 +400,10 @@ class SingleClassClassifier(object):
         history = self.trainModel(
             epochs)
         self.evaluateModel()
+        self.evaluateMetrics()
         self.quantizeModel()
+        self.benchmarkInference()
+        self.getModelSize(self.prod_id)
         self.removeTempDir()
 
     def runHpTuning(self, epochs=10, finetune=False):
